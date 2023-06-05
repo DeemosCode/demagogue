@@ -1,0 +1,10 @@
+﻿Scripts
+.vscode
+__pycache__
+vip.db
+bin
+include
+lib
+lib64
+share
+pyenv.cfg
