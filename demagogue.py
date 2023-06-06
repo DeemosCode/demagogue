@@ -3,7 +3,8 @@ import os
 from pymongo import MongoClient 
 from discord.ext import commands
 from dotenv import load_dotenv
-
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from datetime import datetime, timedelta
 
 load_dotenv()
 TOKEN = os.getenv('YOUR_BOT_TOKEN') # Your Discord bot token
@@ -14,63 +15,45 @@ db = mongo_client['deemos'] # Your MongoDB database
 
 intents = discord.Intents.all()  # This line enables all intents.
 bot = commands.Bot(command_prefix='!', intents=intents)
+scheduler = AsyncIOScheduler()
+
+async def list_members(guild, channel):
+    voice_channels = guild.voice_channels
+    voice_members = []
+    
+    for vc in voice_channels:
+        for member in vc.members:
+            voice_members.append(member.name)
+    
+    voice_members = '\n'.join(voice_members)
+    await channel.send(f'Currently in Voice Channels: \n{voice_members}')
+
 
 @bot.event
 async def on_ready():
     print(f'We have logged in as {bot.user}')
-
-@bot.event
-async def on_ready():
-    print(f'We have logged in as {bot.user}')
+    scheduler.start()
 
 @bot.event
 async def on_command_error(ctx, error):
     await ctx.send(f"An error occurred: {str(error)}")
 
 @bot.command()
-async def ping(ctx):
-    await ctx.send('Pong!')
+async def list(ctx, time: str):
+    time_format = "%H:%M"
+    try:
+        time_obj = datetime.strptime(time, time_format).time()
+        current_time = datetime.now().time()
+        if current_time > time_obj:
+            await ctx.send(f"The time specified has already passed for today.")
+            return
 
-@bot.event
-async def on_raw_reaction_add(payload):
-    # Ensure the reaction is what you expect
-    if str(payload.emoji) != 'reaction_emoji': # the reaction emoji to trigger sign-up
-        return
+        run_date = datetime.now().replace(hour=time_obj.hour, minute=time_obj.minute, second=time_obj.second)
 
-    channel = bot.get_channel(payload.channel_id)
-    if channel is None:
-        return
+        scheduler.add_job(list_members, 'date', run_date=run_date, args=[ctx.guild, ctx.channel])
+        await ctx.send(f'Listing of members in voice channels scheduled at {time_obj.strftime(time_format)}.')
 
-    message = await channel.fetch_message(payload.message_id)
-    if message is None or message.author != bot.user:
-        return
-
-    event_doc = db.events.find_one({"message_id": str(payload.message_id)})
-    if event_doc is None:
-        return
-
-    user_id = payload.user_id
-    if user_id not in event_doc['users']:
-        # Add user to the event
-        db.events.update_one({"message_id": str(payload.message_id)}, {"$push": {"users": user_id}})
-
-        # Update the message to reflect new user
-        users_str = ', '.join([f'<@{user}>' for user in event_doc['users']])
-        await message.edit(content=f'Users signed up for this event: {users_str}')
-
-@bot.command()
-async def list_voice_members(ctx):
-    guild = ctx.guild
-    voice_channels = guild.voice_channels
-
-    voice_members = []
-    
-    for vc in voice_channels:
-        for member in vc.members:
-            voice_members.append(member.name)
-            voice_members.append('\n')
-    
-    voice_members = ', '.join(voice_members)
-    await ctx.send(f'Currently in Voice Channels: \n{voice_members}')
+    except ValueError:
+        await ctx.send(f"Invalid time format. Please use 24-hour format: HH:MM.")
 
 bot.run(TOKEN)
