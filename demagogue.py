@@ -1,6 +1,14 @@
-import discord
 import os
-from pymongo import MongoClient 
+import time
+import json
+import requests
+import schedule
+import calendar
+from pymongo import MongoClient
+from dateutil.relativedelta import relativedelta
+import logging
+import discord
+import os 
 from discord.ext import commands
 from dotenv import load_dotenv
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -13,28 +21,15 @@ TOKEN = os.getenv('YOUR_BOT_TOKEN') # Your Discord bot token
 MONGO_CONNECTION_STRING = os.getenv('MONGO_CONNECTION_STRING') # Your MongoDB connection string
 ROLE_ID = 1115617370745077800  # The ID of the role to be added.
 
-mongo_client = MongoClient(MONGO_CONNECTION_STRING)
-db = mongo_client['deemos'] # Your MongoDB database
+client = MongoClient(MONGO_CONNECTION_STRING)  # Connect to your MongoDB
+db = client.deemos 
+vip = db.vip
 
 intents = discord.Intents.all()  # This line enables all intents.
 bot = commands.Bot(command_prefix='!', intents=intents)
 jobstores = {'default': SQLAlchemyJobStore(url='sqlite:///jobs.sqlite')}
 scheduler = AsyncIOScheduler(jobstores=jobstores)
 
-@bot.command()
-async def list_now(guild_id, channel_id):
-    guild = bot.get_guild(guild_id)
-    channel = bot.get_channel(channel_id)
-
-    voice_channels = guild.voice_channels
-    voice_members = []
-    
-    for vc in voice_channels:
-        for member in vc.members:
-            voice_members.append(member.name)
-    
-    voice_members = '\n'.join(voice_members)
-    await channel.send(f'Currently in Voice Channels: \n{voice_members}')
 
 
 @bot.event
@@ -75,33 +70,115 @@ async def on_ready():
 async def on_command_error(ctx, error):
     await ctx.send(f"An error occurred: {str(error)}")
 
-@bot.command()
-async def list(ctx, time: str):
-    time_format = "%H:%M"
-    try:
-        time_obj = datetime.strptime(time, time_format).time()
-        current_time = datetime.now().time()
-        if current_time > time_obj:
-            await ctx.send(f"The time specified has already passed for today.")
-            return
-
-        run_date = datetime.now().replace(hour=time_obj.hour, minute=time_obj.minute, second=time_obj.second)
-
-        scheduler.add_job(list_now, 'date', run_date=run_date, args=[ctx.guild.id, ctx.channel.id])
-        await ctx.send(f'Listing of members in voice channels scheduled at {time_obj.strftime(time_format)}.')
-
-    except ValueError:
-        await ctx.send(f"Invalid time format. Please use 24-hour format: HH:MM.")
 
 @bot.command()
-async def list_jobs(ctx):
-    jobs = scheduler.get_jobs()
-    response = ''
-    for i, job in enumerate(jobs, start=1):
-        response += f"{i}. {job.name} scheduled at {job.next_run_time} \n"
-    if response:
-        await ctx.send(response)
+async def list_now(ctx):
+    guild = ctx.guild
+
+    voice_channels = guild.voice_channels
+    voice_members = []
+    
+    for vc in voice_channels:
+        for member in vc.members:
+            voice_members.append(member.name)
+    
+    voice_members = '\n'.join(voice_members)
+    await ctx.send(f'Currently in Voice Channels: \n{voice_members}')
+
+from datetime import datetime
+
+@bot.command()
+@commands.has_permissions(administrator=True)  # Ensure only admins can run this command
+async def award(ctx, participation_type: str):
+    guild = ctx.guild
+
+    voice_channels = guild.voice_channels
+    voice_members = []
+    
+    for vc in voice_channels:
+        for member in vc.members:
+            voice_members.append(member.name)
+    
+    voice_members = '\n'.join(voice_members)
+    await ctx.send(f'Currently in Voice Channels: \n{voice_members}')
+
+    # MongoDB interaction starts here
+    for member_name in voice_members.split("\n"):
+        # Look for documents that have the same discord_id
+        existing_member = vip.find_one({"$or": [{"discord_id": member_name}, {"name": member_name}]})
+
+
+        if existing_member is None: 
+            # If no document is found, create a new document
+            new_member = {
+                "discord_id": member_name,
+                "name": "",
+                "minutes_today": 0,
+                "pending_award": False,
+                "steam_id_64": "",
+                "participation": [[datetime.now(), participation_type]],
+                "geforce_now": False,
+                "level": "none",
+                "vip_this_month": False
+            }
+            vip.insert_one(new_member)
+        else:
+            # If the member already exists, add the participation_type to their document
+            vip.update_one(
+                {"discord_id": member_name},
+                {"$push": {"participation": [datetime.now(), participation_type]}}
+            )
+
+@bot.command()
+async def steam(ctx, steam_id: str):
+    # Check if Steam ID is valid (consists only of digits)
+    if not steam_id.isdigit():
+        await ctx.send('Invalid Steam ID. Please provide a valid ID.')
+        return
+
+    # Fetch the member's document from the MongoDB collection
+    existing_member = vip.find_one({'discord_id': str(ctx.message.author.id)})
+
+    # If the member doesn't exist in the database, create a new document for them
+    if existing_member is None:
+        new_member = {
+            'discord_id': str(ctx.message.author.id),
+            'name': ctx.message.author.name,
+            'steam_id_64': steam_id,
+            'minutes_today': 0,
+            'pending_award': False,
+            'participation': [],
+            'geforce_now': False,
+            'level': 'none',
+            'vip_this_month': False
+        }
+        vip.insert_one(new_member)
+        await ctx.send('Your Steam ID has been registered!')
     else:
-        await ctx.send("No jobs scheduled.")
+        # If the member exists, update their Steam ID
+        vip.update_one(
+            {'discord_id': str(ctx.message.author.id)},
+            {'$set': {'steam_id_64': steam_id}}
+        )
+        await ctx.send('Your Steam ID has been updated!')
+
+
+@bot.command()
+@commands.has_permissions(administrator=True)  # Ensure only admins can run this command
+async def rank(ctx):
+    # Fetch all members from the MongoDB collection
+    all_members = vip.find()
+
+    # Create a list of tuples containing member name and participation count
+    participation_counts = [(member['name'], len(member['participation'])) for member in all_members]
+
+    # Sort the list by participation count in descending order
+    participation_counts.sort(key=lambda x: x[1], reverse=True)
+
+    # Convert the list into a string for sending
+    ranking_message = '\n'.join(f'{name}: {count}' for name, count in participation_counts)
+
+    await ctx.send(f'Participation ranking:\n{ranking_message}')
+
 
 bot.run(TOKEN)
