@@ -170,7 +170,7 @@ async def rank(ctx):
     all_members = vip.find()
 
     # Create a list of tuples containing member name and participation count
-    participation_counts = [(member['name'], len(member['participation'])) for member in all_members]
+    participation_counts = [(member['discord_id'], len(member['participation'])) for member in all_members if len(member['participation']) > 0]
 
     # Sort the list by participation count in descending order
     participation_counts.sort(key=lambda x: x[1], reverse=True)
@@ -179,6 +179,40 @@ async def rank(ctx):
     ranking_message = '\n'.join(f'{name}: {count}' for name, count in participation_counts)
 
     await ctx.send(f'Participation ranking:\n{ranking_message}')
+
+from datetime import datetime
+
+@bot.command()
+@commands.has_permissions(administrator=True)  # Ensure only admins can run this command
+async def aaward(ctx, ids: str):
+    today_date = datetime.utcnow()
+
+    # Split the string into individual IDs
+    id_list = [id.strip().lower() for id in ids.split(",")]
+
+    for discord_id in id_list:
+        member = vip.find_one({"discord_id": discord_id})
+
+        if member is not None:
+            # Append new participation entry
+            member['participation'].append([today_date, "training"])
+
+            # Update member document in database
+            vip.update_one({"discord_id": discord_id}, {"$set": {"participation": member['participation']}})
+        else:
+            # Create a new document
+            vip.insert_one({
+                'discord_id': discord_id,
+                'minutes_today': 0,
+                'pending_award': False,
+                'steam_id_64': "",
+                'participation': [[today_date, "training"]],  # add the participation today
+                'geforce_now': False,
+                'level': 'recruit',
+                'vip_this_month': False,
+            })
+        
+    await ctx.send("Added participation entry for specified members.")
 
 
 bot.run(TOKEN)
