@@ -23,7 +23,7 @@ ROLE_ID = 1115617370745077800
 
 client = MongoClient(MONGO_CONNECTION_STRING)  
 db = client.deemos 
-vip = db.vip
+vip = db.members
 
 intents = discord.Intents.all() 
 bot = commands.Bot(command_prefix='!', intents=intents)
@@ -61,12 +61,35 @@ async def on_scheduled_event_user_remove(event, user):
 @bot.event
 async def on_ready():
     print(f'We have logged in as {bot.user}')
-    scheduler.start()
-
 
 @bot.event
 async def on_command_error(ctx, error):
     await ctx.send(f"An error occurred: {str(error)}")
+
+@bot.command()
+async def lookup(ctx, *, member: commands.MemberConverter):
+    await ctx.send(f'Member ID: {member.id}\nMember Name: {member.name}')
+
+@bot.command()
+async def migrate(ctx):
+    guild = discord.utils.get(bot.guilds, id=911623996682932254)  # Replace with your guild ID
+
+    aspiring_deemocrat_role = discord.utils.get(guild.roles, id=1102000164601864304)
+    deemocrat_role = discord.utils.get(guild.roles, id=912034805762363473)
+
+    for member in guild.members:
+        if aspiring_deemocrat_role in member.roles:
+            # vip.insert_one({'discord_id': member.id, 'nickname': member.nick, 'rank': 'recruit'})
+            
+            print(member)
+    
+    # for member in guild.members:
+    #     if deemocrat_role in member.roles:
+    #         # vip.insert_one({'discord_id': member.id, 'nickname': member.nick, 'rank': 'deemocrat'})
+    #         print(member.id)
+
+
+    # print('Members with aspiring deemocrat role have been added to the MongoDB collection')
 
 
 @bot.command()
@@ -169,7 +192,30 @@ async def rank(ctx):
 
 @bot.command()
 @commands.has_permissions(administrator=True)  
-async def aaward(ctx, ids: str):
+async def countrank(ctx):
+    all_members = vip.find()
+
+    participation_counts = []
+    for member in all_members:
+        if len(member['participation']) > 0:
+            type_counts = {}
+            for item in member['participation']:
+                if item[1] in type_counts:
+                    type_counts[item[1]] += 1
+                else:
+                    type_counts[item[1]] = 1
+            participation_counts.append((member['discord_id'], len(member['participation']), type_counts))
+
+    participation_counts.sort(key=lambda x: x[1], reverse=True)
+
+    ranking_message = '\n'.join(f'{count} \t{name},\t\t\t{types}' for name, count, types in participation_counts)
+
+    await ctx.send(f'Participation ranking:\n{ranking_message}')
+
+
+@bot.command()
+@commands.has_permissions(administrator=True)  
+async def aaward(ctx, ids: str, parttype: str):
     today_date = datetime.utcnow()
     id_list = [id.strip().lower() for id in ids.split(",")]
 
@@ -177,7 +223,7 @@ async def aaward(ctx, ids: str):
         member = vip.find_one({"discord_id": discord_id})
 
         if member is not None:
-            member['participation'].append([today_date, "training"])
+            member['participation'].append([today_date, parttype])
             vip.update_one({"discord_id": discord_id}, {"$set": {"participation": member['participation']}})
         else:
             vip.insert_one({
@@ -193,5 +239,20 @@ async def aaward(ctx, ids: str):
         
     await ctx.send("Added participation entry for specified members.")
 
+@bot.command()
+@commands.has_permissions(administrator=True)  
+async def update_recruit(ctx):
+    aspiring_role_id = 1102000164601864304
+    role = discord.utils.get(ctx.guild.roles, id=aspiring_role_id)
+    members_with_role = [member for member in ctx.guild.members if role in member.roles]
+    # Update the 'level' field to 'recruit' for each user with a matching 'discord_id'
+    for member in members_with_role:
+        # vip.update_one(
+        #     {'discord_id': str(member.id).lower()},
+        #     {
+        #         '$set': {'level': 'recruit'}
+        #     }
+        # )
+        await ctx.send(f'{member.nick}\n')
 
 bot.run(TOKEN)
