@@ -1,3 +1,20 @@
+#     demagogue
+#     Copyright (C) 2023 Nikolaos Katzakis
+
+#     This program is free software: you can redistribute it and/or modify
+#     it under the terms of the GNU General Public License as published by
+#     the Free Software Foundation, either version 3 of the License, or
+#     (at your option) any later version.
+
+#     This program is distributed in the hope that it will be useful,
+#     but WITHOUT ANY WARRANTY; without even the implied warranty of
+#     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#     GNU General Public License for more details.
+
+#     You should have received a copy of the GNU General Public License
+#     along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
 import os
 import time
 import json
@@ -191,6 +208,34 @@ async def rank(ctx):
 
 @bot.command()
 @commands.has_permissions(administrator=True)  
+async def rankmonth(ctx, month_name: str):
+    # Convert the month name to its corresponding number
+    try:
+        month_number = datetime.strptime(month_name, "%B").month
+    except ValueError:
+        await ctx.send("Invalid month name. Please provide a valid month (e.g., 'January', 'February', etc.).")
+        return
+
+    all_members = vip.find()
+
+    participation_counts = []
+
+    current_year = datetime.utcnow().year
+
+    for member in all_members:
+        month_participation = [entry for entry in member['participation'] if entry[0].month == month_number and entry[0].year == current_year]
+        if len(month_participation) > 0:
+            participation_counts.append((member['discord_id'], len(month_participation)))
+
+    participation_counts.sort(key=lambda x: x[1], reverse=True)
+
+    ranking_message = '\n'.join(f'{name}: {count}' for name, count in participation_counts)
+
+    await ctx.send(f'Participation ranking for {month_name} {current_year}:\n{ranking_message}')
+
+
+@bot.command()
+@commands.has_permissions(administrator=True)  
 async def rank30(ctx):
     all_members = vip.find()
 
@@ -308,5 +353,27 @@ async def request(ctx):
             })
         
     await ctx.send("Added 'random' participation for members in voice channels.")
+
+
+@bot.command()
+async def help(ctx):
+    commands_list = [
+        "lookup <user_mention_or_name>: Lookup member information",
+        "migrate: Migrate members with a certain role to the database",
+        "list_now: List members currently in voice channels",
+        "award <participation_type>: Award participation to members in voice channels",
+        "steam <steam_id>: Register or update Steam ID",
+        "rank: Show participation ranking",
+        "rankmonth <month_name>: Show participation ranking for a specific month",
+        "rank30: Show participation ranking for the last 30 days",
+        "countrank: Show participation ranking by type",
+        "aaward <user_ids> <participation_type>: Add participation for specific members",
+        "update_recruit: Update recruit level for certain role",
+        "request: Add 'random' participation for members in voice channels"
+    ]
+    
+    help_message = "\n".join(commands_list)
+    
+    await ctx.send(f"Available commands:\n```\n{help_message}\n```")
 
 bot.run(TOKEN)
