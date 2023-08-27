@@ -189,6 +189,26 @@ async def rank(ctx):
 
     await ctx.send(f'Participation ranking:\n{ranking_message}')
 
+@bot.command()
+@commands.has_permissions(administrator=True)  
+async def rank30(ctx):
+    all_members = vip.find()
+
+    participation_counts = []
+
+    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+
+    for member in all_members:
+        recent_participation = [entry for entry in member['participation'] if entry[0] >= thirty_days_ago]
+        if len(recent_participation) > 0:
+            participation_counts.append((member['discord_id'], len(recent_participation)))
+
+    participation_counts.sort(key=lambda x: x[1], reverse=True)
+
+    ranking_message = '\n'.join(f'{name}: {count}' for name, count in participation_counts)
+
+    await ctx.send(f'Participation ranking (last 30 days):\n{ranking_message}')
+
 
 @bot.command()
 @commands.has_permissions(administrator=True)  
@@ -254,5 +274,39 @@ async def update_recruit(ctx):
         #     }
         # )
         await ctx.send(f'{member.nick}\n')
+
+@bot.command()
+async def request(ctx):
+    if not isinstance(ctx.channel, discord.DMChannel):  # Ensure the command is run in a private message
+        return
+
+    guild = discord.utils.get(bot.guilds, id=911623996682932254)  # Replace with your guild ID
+
+    voice_channels = guild.voice_channels
+    voice_members = []
+
+    for vc in voice_channels:
+        for member in vc.members:
+            voice_members.append(str(member.id).lower())  # convert to lowercase here
+
+    for member_id in voice_members:
+        member = vip.find_one({"discord_id": member_id})
+
+        if member is not None:
+            member['participation'].append([datetime.now(), 'random'])
+            vip.update_one({"discord_id": member_id}, {"$set": {"participation": member['participation']}})
+        else:
+            vip.insert_one({
+                'discord_id': member_id,
+                'minutes_today': 0,
+                'pending_award': False,
+                'steam_id_64': "",
+                'participation': [[datetime.now(), 'random']],
+                'geforce_now': False,
+                'level': 'none',
+                'vip_this_month': False,
+            })
+        
+    await ctx.send("Added 'random' participation for members in voice channels.")
 
 bot.run(TOKEN)
