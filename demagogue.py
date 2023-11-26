@@ -305,22 +305,6 @@ async def aaward(ctx, ids: str, parttype: str):
     await ctx.send("Added participation entry for specified members.")
 
 @bot.command()
-@commands.has_permissions(administrator=True)  
-async def update_recruit(ctx):
-    aspiring_role_id = 1102000164601864304
-    role = discord.utils.get(ctx.guild.roles, id=aspiring_role_id)
-    members_with_role = [member for member in ctx.guild.members if role in member.roles]
-    # Update the 'level' field to 'recruit' for each user with a matching 'discord_name'
-    for member in members_with_role:
-        # vip.update_one(
-        #     {'discord_name': str(member.id).lower()},
-        #     {
-        #         '$set': {'level': 'recruit'}
-        #     }
-        # )
-        await ctx.send(f'{member.nick}\n')
-
-@bot.command()
 async def request(ctx):
     if not isinstance(ctx.channel, discord.DMChannel):  # Ensure the command is run in a private message
         return
@@ -354,61 +338,64 @@ async def request(ctx):
         
     await ctx.send("Added 'random' participation for members in voice channels.")
 
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def sync_roles(ctx):
-    guild = ctx.guild
-
-    # Get all members from MongoDB
-    all_members = mongo_members_collection.find()
-
-    for member_data in all_members:
-        # Check if the member exists in the current guild
-        member = guild.get_member_named(member_data['discord_name'])
-        if member is not None:
-            # Update the user data in MongoDB with synchronized roles
-            mongo_members_collection.update_one(
-    {"discord_name": str(member.name).lower()},
-    {
-        "$addToSet": {"roles": {"$each": [str(role.id) for role in member.roles]}}
-    },
-    upsert=True
-)
-            await ctx.send(f"Roles synchronized for {member.name}")
-
-    await ctx.send("Roles synchronized with MongoDB for members present in the guild.")
-
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def sync_roles_debug(ctx):
-    guild = ctx.guild
-
-    # Get all members from MongoDB
-    all_members = mongo_members_collection.find()
-
-    for member_data in all_members:
-        # Check if the member exists in the current guild
-        member = guild.get_member_named(member_data['discord_name'])
-        if member is not None:
-            # Update the user data in MongoDB with synchronized roles
-            result = mongo_members_collection.update_one(
-                {"discord_name": str(member.name).lower()},
-                {
-                    "$addToSet": {"roles": {"$each": [str(role.id) for role in member.roles]}}
-                },
-                upsert=True
-            )
-
-            # Print the result of the update operation
-            print(f"{member.name} Matched Count: {result.matched_count}, Modified Count: {result.modified_count}")
-
-            await ctx.send(f"Roles synchronized for {member.name}")
-
-    await ctx.send("Roles synchronized with MongoDB for members present in the guild.")
 
 @bot.command()
 async def check_activity(ctx):
+    today_date = datetime.utcnow()
+
+    # Define role IDs and corresponding inactivity periods
+    role_inactive_periods = {
+        1102000164601864304: 1,  # Inactive for 1 month for "aspiring"
+        912034805762363473: 4    # Inactive for 4 months for "deemocrat"
+    }
+
+    # Define role strings
+    role_strings = {
+        1102000164601864304: "aspiring deemocrat",
+        912034805762363473: "deemocrat"
+    }
+
+    inactive_users_list = []
+
+    # Function to check if a user is active in the last month
+    def is_active_in_last_month(user_data):
+        last_participation_dates = [entry[0] for entry in user_data.get('participation', []) if entry[0] >= today_date - relativedelta(months=1) and entry[0] <= today_date]
+        return bool(last_participation_dates)
+
+    # Function to check if a user is active in the last N months
+    def is_active_in_last_months(user_data, months):
+        last_participation_date = max(entry[0] for entry in user_data.get('participation', [])) if user_data.get('participation') else None
+        return last_participation_date is not None and last_participation_date >= today_date - relativedelta(months=months)
+
+    # Fetch guild members with either of the specified roles
+    aspiring_members = [member for member in ctx.guild.members if discord.utils.get(member.roles, id=1102000164601864304)]
+    deemocrat_members = [member for member in ctx.guild.members if discord.utils.get(member.roles, id=912034805762363473)]
+
+    # Check for "aspiring" members
+    for member in aspiring_members:
+        # Get the user data from MongoDB based on discord_name
+        user_data = mongo_members_collection.find_one({"discord_name": member.name})
+
+        # Check if the member has no entry in MongoDB or no participation entries in the last month
+        if user_data is None or not is_active_in_last_month(user_data):
+            inactive_users_list.append(f"{member.name} ({role_strings[1102000164601864304]})")
+
+    # Check for "deemocrat" members
+    for member in deemocrat_members:
+        # Get the user data from MongoDB based on discord_name
+        user_data = mongo_members_collection.find_one({"discord_name": member.name})
+
+        # Check if the member has no entry in MongoDB or no participation entries in the last 4 months
+        if user_data is None or not is_active_in_last_months(user_data, role_inactive_periods[912034805762363473]):
+            inactive_users_list.append(f"{member.name} ({role_strings[912034805762363473]})")
+
+    if inactive_users_list:
+        await ctx.send(f'Inactive users:\n{", ".join(inactive_users_list)}')
+    else:
+        await ctx.send('All users are active.')
+
+@bot.command()
+async def check_and_demote(ctx):
     today_date = datetime.utcnow()
 
     # Define role IDs and corresponding inactivity periods
@@ -448,6 +435,9 @@ async def check_activity(ctx):
         if user_data is None or not is_active_in_last_month(user_data):
             inactive_users_list.append(f"{member.name} ({role_strings[1102000164601864304]})")
 
+            # Demote the user by removing the "aspiring" role
+            await member.remove_roles(discord.utils.get(ctx.guild.roles, id=1102000164601864304))
+
     # Check for "deemocrat" members
     for member in deemocrat_members:
         # Get the user data from MongoDB based on discord_name
@@ -457,9 +447,14 @@ async def check_activity(ctx):
         if user_data is None or not is_active_in_last_months(user_data, role_inactive_periods[912034805762363473]):
             inactive_users_list.append(f"{member.name} ({role_strings[912034805762363473]})")
 
+            # Demote the user by removing the "deemocrat" role and adding the "aspiring" role
+            await member.remove_roles(discord.utils.get(ctx.guild.roles, id=912034805762363473))
+            await member.add_roles(discord.utils.get(ctx.guild.roles, id=1102000164601864304))
+
     if inactive_users_list:
         await ctx.send(f'Inactive users:\n{", ".join(inactive_users_list)}')
     else:
         await ctx.send('All users are active.')
+
 
 bot.run(TOKEN)
