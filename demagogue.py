@@ -40,7 +40,7 @@ ROLE_ID = 1115617370745077800
 
 client = MongoClient(MONGO_CONNECTION_STRING)  
 db = client.deemos 
-vip = db.members
+mongo_members_collection = db.members
 
 intents = discord.Intents.all() 
 bot = commands.Bot(command_prefix='!', intents=intents)
@@ -96,13 +96,13 @@ async def migrate(ctx):
 
     for member in guild.members:
         if aspiring_deemocrat_role in member.roles:
-            # vip.insert_one({'discord_id': member.id, 'nickname': member.nick, 'rank': 'recruit'})
+            # vip.insert_one({'discord_name': member.id, 'nickname': member.nick, 'rank': 'recruit'})
             
             print(member)
     
     # for member in guild.members:
     #     if deemocrat_role in member.roles:
-    #         # vip.insert_one({'discord_id': member.id, 'nickname': member.nick, 'rank': 'deemocrat'})
+    #         # vip.insert_one({'discord_name': member.id, 'nickname': member.nick, 'rank': 'deemocrat'})
     #         print(member.id)
 
 
@@ -140,11 +140,11 @@ async def award(ctx, participation_type: str):
     await ctx.send(f'Currently in Voice Channels: \n{voice_members}')
 
     for member_name in voice_members.split("\n"):
-        existing_member = vip.find_one({"discord_id": member_name})
+        existing_member = mongo_members_collection.find_one({"discord_name": member_name})
 
         if existing_member is None: 
             new_member = {
-                "discord_id": member_name,
+                "discord_name": member_name,
                 "name": "",
                 "minutes_today": 0,
                 "pending_award": False,
@@ -154,10 +154,10 @@ async def award(ctx, participation_type: str):
                 "level": "none",
                 "vip_this_month": False
             }
-            vip.insert_one(new_member)
+            mongo_members_collection.insert_one(new_member)
         else:
-            vip.update_one(
-                {"discord_id": member_name},
+            mongo_members_collection.update_one(
+                {"discord_name": member_name},
                 {"$push": {"participation": [datetime.now(), participation_type]}}
             )
 
@@ -169,11 +169,11 @@ async def steam(ctx, steam_id: str):
         return
 
     discord_id_lower = str(ctx.message.author.id).lower() # convert to lowercase here
-    existing_member = vip.find_one({'discord_id': discord_id_lower})
+    existing_member = mongo_members_collection.find_one({'discord_name': discord_id_lower})
 
     if existing_member is None:
         new_member = {
-            'discord_id': discord_id_lower,
+            'discord_name': discord_id_lower,
             'name': ctx.message.author.name,
             'steam_id_64': steam_id,
             'minutes_today': 0,
@@ -183,11 +183,11 @@ async def steam(ctx, steam_id: str):
             'level': 'none',
             'vip_this_month': False
         }
-        vip.insert_one(new_member)
+        mongo_members_collection.insert_one(new_member)
         await ctx.send('Your Steam ID has been registered!')
     else:
-        vip.update_one(
-            {'discord_id': discord_id_lower},
+        mongo_members_collection.update_one(
+            {'discord_name': discord_id_lower},
             {'$set': {'steam_id_64': steam_id}}
         )
         await ctx.send('Your Steam ID has been updated!')
@@ -196,9 +196,9 @@ async def steam(ctx, steam_id: str):
 @bot.command()
 @commands.has_permissions(administrator=True)  
 async def rank(ctx):
-    all_members = vip.find()
+    all_members = mongo_members_collection.find()
 
-    participation_counts = [(member['discord_id'], len(member['participation'])) for member in all_members if len(member['participation']) > 0]
+    participation_counts = [(member['discord_name'], len(member['participation'])) for member in all_members if len(member['participation']) > 0]
 
     participation_counts.sort(key=lambda x: x[1], reverse=True)
 
@@ -216,7 +216,7 @@ async def rankmonth(ctx, month_name: str):
         await ctx.send("Invalid month name. Please provide a valid month (e.g., 'January', 'February', etc.).")
         return
 
-    all_members = vip.find()
+    all_members = mongo_members_collection.find()
 
     participation_counts = []
 
@@ -225,7 +225,7 @@ async def rankmonth(ctx, month_name: str):
     for member in all_members:
         month_participation = [entry for entry in member['participation'] if entry[0].month == month_number and entry[0].year == current_year]
         if len(month_participation) > 0:
-            participation_counts.append((member['discord_id'], len(month_participation)))
+            participation_counts.append((member['discord_name'], len(month_participation)))
 
     participation_counts.sort(key=lambda x: x[1], reverse=True)
 
@@ -237,7 +237,7 @@ async def rankmonth(ctx, month_name: str):
 @bot.command()
 @commands.has_permissions(administrator=True)  
 async def rank30(ctx):
-    all_members = vip.find()
+    all_members = mongo_members_collection.find()
 
     participation_counts = []
 
@@ -246,7 +246,7 @@ async def rank30(ctx):
     for member in all_members:
         recent_participation = [entry for entry in member['participation'] if entry[0] >= thirty_days_ago]
         if len(recent_participation) > 0:
-            participation_counts.append((member['discord_id'], len(recent_participation)))
+            participation_counts.append((member['discord_name'], len(recent_participation)))
 
     participation_counts.sort(key=lambda x: x[1], reverse=True)
 
@@ -258,7 +258,7 @@ async def rank30(ctx):
 @bot.command()
 @commands.has_permissions(administrator=True)  
 async def countrank(ctx):
-    all_members = vip.find()
+    all_members = mongo_members_collection.find()
 
     participation_counts = []
     for member in all_members:
@@ -269,7 +269,7 @@ async def countrank(ctx):
                     type_counts[item[1]] += 1
                 else:
                     type_counts[item[1]] = 1
-            participation_counts.append((member['discord_id'], len(member['participation']), type_counts))
+            participation_counts.append((member['discord_name'], len(member['participation']), type_counts))
 
     participation_counts.sort(key=lambda x: x[1], reverse=True)
 
@@ -285,14 +285,14 @@ async def aaward(ctx, ids: str, parttype: str):
     id_list = [id.strip().lower() for id in ids.split(",")]
 
     for discord_id in id_list:
-        member = vip.find_one({"discord_id": discord_id})
+        member = mongo_members_collection.find_one({"discord_name": discord_id})
 
         if member is not None:
             member['participation'].append([today_date, parttype])
-            vip.update_one({"discord_id": discord_id}, {"$set": {"participation": member['participation']}})
+            mongo_members_collection.update_one({"discord_name": discord_id}, {"$set": {"participation": member['participation']}})
         else:
-            vip.insert_one({
-                'discord_id': discord_id,
+            mongo_members_collection.insert_one({
+                'discord_name': discord_id,
                 'minutes_today': 0,
                 'pending_award': False,
                 'steam_id_64': "",
@@ -310,10 +310,10 @@ async def update_recruit(ctx):
     aspiring_role_id = 1102000164601864304
     role = discord.utils.get(ctx.guild.roles, id=aspiring_role_id)
     members_with_role = [member for member in ctx.guild.members if role in member.roles]
-    # Update the 'level' field to 'recruit' for each user with a matching 'discord_id'
+    # Update the 'level' field to 'recruit' for each user with a matching 'discord_name'
     for member in members_with_role:
         # vip.update_one(
-        #     {'discord_id': str(member.id).lower()},
+        #     {'discord_name': str(member.id).lower()},
         #     {
         #         '$set': {'level': 'recruit'}
         #     }
@@ -335,14 +335,14 @@ async def request(ctx):
             voice_members.append(str(member.id).lower())  # convert to lowercase here
 
     for member_id in voice_members:
-        member = vip.find_one({"discord_id": member_id})
+        member = mongo_members_collection.find_one({"discord_name": member_id})
 
         if member is not None:
             member['participation'].append([datetime.now(), 'random'])
-            vip.update_one({"discord_id": member_id}, {"$set": {"participation": member['participation']}})
+            mongo_members_collection.update_one({"discord_name": member_id}, {"$set": {"participation": member['participation']}})
         else:
-            vip.insert_one({
-                'discord_id': member_id,
+            mongo_members_collection.insert_one({
+                'discord_name': member_id,
                 'minutes_today': 0,
                 'pending_award': False,
                 'steam_id_64': "",
@@ -354,26 +354,112 @@ async def request(ctx):
         
     await ctx.send("Added 'random' participation for members in voice channels.")
 
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def sync_roles(ctx):
+    guild = ctx.guild
+
+    # Get all members from MongoDB
+    all_members = mongo_members_collection.find()
+
+    for member_data in all_members:
+        # Check if the member exists in the current guild
+        member = guild.get_member_named(member_data['discord_name'])
+        if member is not None:
+            # Update the user data in MongoDB with synchronized roles
+            mongo_members_collection.update_one(
+    {"discord_name": str(member.name).lower()},
+    {
+        "$addToSet": {"roles": {"$each": [str(role.id) for role in member.roles]}}
+    },
+    upsert=True
+)
+            await ctx.send(f"Roles synchronized for {member.name}")
+
+    await ctx.send("Roles synchronized with MongoDB for members present in the guild.")
+
 
 @bot.command()
-async def help(ctx):
-    commands_list = [
-        "lookup <user_mention_or_name>: Lookup member information",
-        "migrate: Migrate members with a certain role to the database",
-        "list_now: List members currently in voice channels",
-        "award <participation_type>: Award participation to members in voice channels",
-        "steam <steam_id>: Register or update Steam ID",
-        "rank: Show participation ranking",
-        "rankmonth <month_name>: Show participation ranking for a specific month",
-        "rank30: Show participation ranking for the last 30 days",
-        "countrank: Show participation ranking by type",
-        "aaward <user_ids> <participation_type>: Add participation for specific members",
-        "update_recruit: Update recruit level for certain role",
-        "request: Add 'random' participation for members in voice channels"
-    ]
-    
-    help_message = "\n".join(commands_list)
-    
-    await ctx.send(f"Available commands:\n```\n{help_message}\n```")
+@commands.has_permissions(administrator=True)
+async def sync_roles_debug(ctx):
+    guild = ctx.guild
+
+    # Get all members from MongoDB
+    all_members = mongo_members_collection.find()
+
+    for member_data in all_members:
+        # Check if the member exists in the current guild
+        member = guild.get_member_named(member_data['discord_name'])
+        if member is not None:
+            # Update the user data in MongoDB with synchronized roles
+            result = mongo_members_collection.update_one(
+                {"discord_name": str(member.name).lower()},
+                {
+                    "$addToSet": {"roles": {"$each": [str(role.id) for role in member.roles]}}
+                },
+                upsert=True
+            )
+
+            # Print the result of the update operation
+            print(f"{member.name} Matched Count: {result.matched_count}, Modified Count: {result.modified_count}")
+
+            await ctx.send(f"Roles synchronized for {member.name}")
+
+    await ctx.send("Roles synchronized with MongoDB for members present in the guild.")
+
+@bot.command()
+async def check_activity(ctx):
+    today_date = datetime.utcnow()
+
+    # Define role IDs and corresponding inactivity periods
+    role_inactive_periods = {
+        1102000164601864304: 1,  # Inactive for 1 month for "aspiring"
+        912034805762363473: 4    # Inactive for 4 months for "deemocrat"
+    }
+
+    # Define role strings
+    role_strings = {
+        1102000164601864304: "aspiring",
+        912034805762363473: "deemocrat"
+    }
+
+    inactive_users_list = []
+
+    # Function to check if a user is active in the last month
+    def is_active_in_last_month(user_data):
+        last_participation_date = max(entry[0] for entry in user_data.get('participation', [])) if user_data.get('participation') else None
+        return last_participation_date is not None and last_participation_date >= today_date - relativedelta(months=1)
+
+    # Function to check if a user is active in the last N months
+    def is_active_in_last_months(user_data, months):
+        last_participation_date = max(entry[0] for entry in user_data.get('participation', [])) if user_data.get('participation') else None
+        return last_participation_date is not None and last_participation_date >= today_date - relativedelta(months=months)
+
+    # Fetch guild members with either of the specified roles
+    aspiring_members = [member for member in ctx.guild.members if discord.utils.get(member.roles, id=1102000164601864304)]
+    deemocrat_members = [member for member in ctx.guild.members if discord.utils.get(member.roles, id=912034805762363473)]
+
+    # Check for "aspiring" members
+    for member in aspiring_members:
+        # Get the user data from MongoDB based on discord_name
+        user_data = mongo_members_collection.find_one({"discord_name": member.name})
+
+        # Check if the member has no entry in MongoDB or no participation entries in the last month
+        if user_data is None or not is_active_in_last_month(user_data):
+            inactive_users_list.append(f"{member.name} ({role_strings[1102000164601864304]})")
+
+    # Check for "deemocrat" members
+    for member in deemocrat_members:
+        # Get the user data from MongoDB based on discord_name
+        user_data = mongo_members_collection.find_one({"discord_name": member.name})
+
+        # Check if the member has no entry in MongoDB or no participation entries in the last 4 months
+        if user_data is None or not is_active_in_last_months(user_data, role_inactive_periods[912034805762363473]):
+            inactive_users_list.append(f"{member.name} ({role_strings[912034805762363473]})")
+
+    if inactive_users_list:
+        await ctx.send(f'Inactive users:\n{", ".join(inactive_users_list)}')
+    else:
+        await ctx.send('All users are active.')
 
 bot.run(TOKEN)
