@@ -2,6 +2,8 @@ import discord
 import os
 
 from pymongo import MongoClient
+from bson import ObjectId
+from datetime import datetime
 
 # Connect to MongoDB
 MONGO_CONNECTION_STRING = os.getenv('MONGO_CONNECTION_STRING') # Your MongoDB connection string
@@ -10,16 +12,20 @@ client = MongoClient(MONGO_CONNECTION_STRING)
 db = client.deemos  # Replace with your database name
 collection = db.members  # Replace with your collection name
 
-# Iterate over all documents in the collection
 for document in collection.find():
-    # Get the values of member_id and member_name
-    discord_id = document.get('discord_id')
+    # Check if the document has the 'participation' field
+    if 'participation' in document:
+        # Convert the participation array
+        new_participation = [
+            (entry[0], entry[1])
+            for entry in document['participation']
+        ]
 
-    # Update the document with the new field
-    collection.update_one(
-        {"_id": document["_id"]},  # Assuming each document has an "_id" field
-        {"$set": {"discord_name": discord_id}, "$unset": {"discord_id": ""}}
-    )
+        # Update the document with the new structure
+        collection.update_one(
+            {'_id': document['_id']},
+            {'$set': {'participation': new_participation}}
+        )
 
 # Close the MongoDB connection
 client.close()
