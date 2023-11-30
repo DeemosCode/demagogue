@@ -327,7 +327,7 @@ async def check_activity(ctx):
 
     # Function to check if a user is active in the last month based on role_info
     def is_active_in_last_month(role_info):
-        acquisition_date = role_info[2] if role_info else None
+        acquisition_date = role_info[0][2] if role_info else None
 
         if acquisition_date:
             acquisition_date = acquisition_date.replace(tzinfo=None)  # Remove timezone info for comparison
@@ -337,7 +337,7 @@ async def check_activity(ctx):
 
     # Function to check if a user is active in the last N months based on role_info
     def is_active_in_last_months(role_info, months):
-        acquisition_date = role_info[2] if role_info else None
+        acquisition_date = role_info[1][2] if role_info else None
 
         if acquisition_date:
             acquisition_date = acquisition_date.replace(tzinfo=None)  # Remove timezone info for comparison
@@ -353,7 +353,7 @@ async def check_activity(ctx):
         # Check if the member has the "aspiring deemocrat" role
         if any(role[0] == 1102000164601864304 and role[1] for role in member_data.get('role_info', [])):
             # Check if the member has no entry in MongoDB or is not active in the last month
-            if not is_active_in_last_month(member_data.get('role_info', {}).get(0)):
+            if not is_active_in_last_month(member_data.get('role_info', [])):
                 inactive_users_list.append(f"{member_data['discord_name']} ({role_strings[1102000164601864304]})")
 
     # Check for "deemocrat" members
@@ -361,7 +361,7 @@ async def check_activity(ctx):
         # Check if the member has the "deemocrat" role
         if any(role[0] == 912034805762363473 and role[1] for role in member_data.get('role_info', [])):
             # Check if the member has no entry in MongoDB or is not active in the last 4 months
-            if not is_active_in_last_months(member_data.get('role_info', {}).get(1), role_inactive_periods[912034805762363473]):
+            if not is_active_in_last_months(member_data.get('role_info', []), role_inactive_periods[912034805762363473]):
                 inactive_users_list.append(f"{member_data['discord_name']} ({role_strings[912034805762363473]})")
 
     if inactive_users_list:
