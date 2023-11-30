@@ -9,22 +9,21 @@ from datetime import datetime
 MONGO_CONNECTION_STRING = os.getenv('MONGO_CONNECTION_STRING') # Your MongoDB connection string
 client = MongoClient(MONGO_CONNECTION_STRING)  
 
-db = client.deemos  # Replace with your database name
-collection = db.members  # Replace with your collection name
+db = client.deemos
+collection = db.members  
 
+# Iterate over all documents in the collection
 for document in collection.find():
-    # Check if the document has the 'participation' field
-    if 'participation' in document:
-        # Convert the participation array
-        new_participation = [
-            (entry[0], entry[1])
-            for entry in document['participation']
-        ]
+        # Extract only 'discord_name' and 'participation'
+        updated_document = {
+            'discord_name': document.get('discord_name', ''),
+            'participation': document.get('participation', [])
+        }
 
         # Update the document with the new structure
-        collection.update_one(
+        collection.replace_one(
             {'_id': document['_id']},
-            {'$set': {'participation': new_participation}}
+            updated_document
         )
 
 # Close the MongoDB connection

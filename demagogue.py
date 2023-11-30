@@ -47,34 +47,6 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 jobstores = {'default': SQLAlchemyJobStore(url='sqlite:///jobs.sqlite')}
 scheduler = AsyncIOScheduler(jobstores=jobstores)
 
-
-@bot.event
-async def on_scheduled_event_user_add(event, user):
-    event_parts = event.name.split(" vs ")
-
-    if len(event_parts) == 3:
-        opponent_name = event_parts[2].lower()
-
-        guild = bot.get_guild(event.guild_id)
-        role = discord.utils.find(lambda r: opponent_name in r.name.lower(), guild.roles)
-
-        if role is not None:
-            member = guild.get_member(user.id)
-
-            if role not in member.roles:
-                await member.add_roles(role)
-
-
-@bot.event
-async def on_scheduled_event_user_remove(event, user):
-    guild = bot.get_guild(event.guild_id)
-    role = discord.utils.get(guild.roles, id=ROLE_ID)
-
-    member = guild.get_member(user.id)
-    if role in member.roles:
-        await member.remove_roles(role)
-
-
 @bot.event
 async def on_ready():
     print(f'We have logged in as {bot.user}')
@@ -83,9 +55,6 @@ async def on_ready():
 async def on_command_error(ctx, error):
     await ctx.send(f"An error occurred: {str(error)}")
 
-@bot.command()
-async def lookup(ctx, *, member: commands.MemberConverter):
-    await ctx.send(f'Member ID: {member.id}\nMember Name: {member.name}')
 
 @bot.command()
 async def migrate(ctx):
@@ -414,38 +383,131 @@ async def check_activity(ctx):
 
 output_channel_id = 1114195400371486840
 
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def update_discord_ids(ctx):
+    # Get all documents in the MongoDB collection
+    all_members = mongo_members_collection.find()
+
+    for existing_member in all_members:
+        discord_name = existing_member.get("discord_name")
+
+        if discord_name:
+            # Look up the discord_id in the guild
+            member = discord.utils.get(ctx.guild.members, name=discord_name)
+
+            if member:
+                # Update the existing document with the discord_id
+                mongo_members_collection.update_one(
+                    {"discord_name": discord_name},
+                    {"$set": {"discord_id": str(member.id)}}
+                )
+                await ctx.send(f"Updated discord_id for {discord_name} to {member.id}")
+            else:
+                await ctx.send(f"Member with the name {discord_name} not found in the guild.")
+        else:
+            await ctx.send("Discord_name is missing in a document. Skipping update.")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def update_roles(ctx):
+    # Get all documents in the MongoDB collection
+    all_members = mongo_members_collection.find({"discord_id": {"$exists": True}})
+
+    for existing_member in all_members:
+        discord_id = existing_member.get("discord_id")
+
+        if discord_id:
+            # Look up the member in the guild using discord_id
+            member = ctx.guild.get_member(int(discord_id))
+
+            if member:
+                # Check if the member has the specified roles
+                deemocrat_role = discord.utils.get(ctx.guild.roles, id=912034805762363473)
+                aspiring_deemocrat_role = discord.utils.get(ctx.guild.roles, id=1102000164601864304)
+
+                deemocrat_status = bool(deemocrat_role in member.roles)
+                aspiring_deemocrat_status = bool(aspiring_deemocrat_role in member.roles)
+
+                # Store the role information in the MongoDB document
+                role_info = [
+                    (912034805762363473, deemocrat_status, member.joined_at),
+                    (1102000164601864304, aspiring_deemocrat_status, member.joined_at)
+                ]
+
+                mongo_members_collection.update_one(
+                    {"discord_id": discord_id},
+                    {"$set": {"role_info": role_info}}
+                )
+                await ctx.send(f"Updated role information for {discord_id}")
+            else:
+                await ctx.send(f"Member with the discord_id {discord_id} not found in the guild.")
+        else:
+            await ctx.send("Discord_id is missing in a document. Skipping update.")
+
+
 @bot.event
 async def on_member_update(before, after):
-    roles_to_track = ["deemocrat", "aspiring deemocrat"]
-    
-    role_changes = set(after.roles) - set(before.roles)
+    # Check if roles have been updated for the member
+    if before.roles != after.roles:
+        discord_id = str(after.id)
 
-    roles_data = []
-    for role in roles_to_track:
-        has_role = role in after.roles
-        roles_data.append({
-            "role": role,
-            "hasRole": has_role,
-            "timestamp": datetime.utcnow() if has_role else None
-        })
+        # Check if the member is in the MongoDB collection
+        existing_member = mongo_members_collection.find_one({"discord_id": discord_id})
 
-    member_data = {
-        "discord_id": str(after.id),
-        "discord_name": after.display_name,
-        "roles": roles_data
-    }
+        if existing_member:
+            # Check if the specific roles exist in the guild
+            deemocrat_role = discord.utils.get(after.guild.roles, id=912034805762363473)
+            aspiring_deemocrat_role = discord.utils.get(after.guild.roles, id=1102000164601864304)
 
-    # Upsert the member data into the MongoDB collection
-    mongo_members_collection.update_one(
-        {"discord_id": str(after.id)},
-        {"$set": member_data},
-        upsert=True
-    )
+            if deemocrat_role and aspiring_deemocrat_role:
+                # Check if the roles have changed
+                role_info = existing_member.get("role_info", [])
+                roles_changed = False
 
-     # Get the channel by ID
-    channel = bot.get_channel(output_channel_id)
+                # Check Deemocrat role
+                deemocrat_status = bool(deemocrat_role in after.roles)
+                if role_info and role_info[0][1] != deemocrat_status:
+                    roles_changed = True
+                role_info[0] = (912034805762363473, deemocrat_status, datetime.utcnow())
 
-    # Send the output to the specified channel
-    await channel.send(f"Role update logged in MongoDB for {after.display_name}")
+                # Check Aspiring Deemocrat role
+                aspiring_deemocrat_status = bool(aspiring_deemocrat_role in after.roles)
+                if role_info and len(role_info) > 1 and role_info[1][1] != aspiring_deemocrat_status:
+                    roles_changed = True
+                role_info[1] = (1102000164601864304, aspiring_deemocrat_status, datetime.utcnow())
+
+                # Update the MongoDB document only if roles have changed
+                if roles_changed:
+                    mongo_members_collection.update_one(
+                        {"discord_id": discord_id},
+                        {"$set": {"role_info": role_info}}
+                    )
+
+                    # Get the specified guild and channel
+                    guild = bot.get_guild(911623996682932254)  # Replace YOUR_GUILD_ID with your guild ID
+                    channel = guild.get_channel(1114195400371486840)  # Replace 1114195400371486840 with your channel ID
+
+                    # Send a message to the channel
+                    await channel.send(f"Updated role information for {discord_id} ({after.name})")
+        else:
+            # Create a new document for the member in the MongoDB collection
+            new_member = {
+                "discord_id": discord_id,
+                "discord_name": after.name,
+                "role_info": [],
+                # Add other fields as needed
+            }
+
+            # Add the new member to the MongoDB collection
+            mongo_members_collection.insert_one(new_member)
+
+            # Get the specified guild and channel
+            guild = bot.get_guild(911623996682932254)  # Replace YOUR_GUILD_ID with your guild ID
+            channel = guild.get_channel(1114195400371486840)  # Replace 1114195400371486840 with your channel ID
+
+            # Send a message to the channel
+            await channel.send(f"Created a new document for {discord_id} ({after.name}) and updated role information.")
+
 
 bot.run(TOKEN)
