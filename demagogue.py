@@ -325,56 +325,44 @@ async def check_activity(ctx):
 
     inactive_users_list = []
 
-    # Function to check if a user is active in the last month
-    def is_active_in_last_month(user_data):
-        last_participation_dates = [entry[0] for entry in user_data.get('participation', []) if entry[0] >= today_date - timedelta(days=30) and entry[0] <= today_date]
-        
-        if last_participation_dates:
-            most_recent_participation_date = max(last_participation_dates)
-            return most_recent_participation_date >= today_date - timedelta(days=30)
+    # Function to check if a user is active in the last month based on role_info
+    def is_active_in_last_month(role_info):
+        acquisition_date = role_info[2] if role_info else None
+
+        if acquisition_date:
+            acquisition_date = acquisition_date.replace(tzinfo=None)  # Remove timezone info for comparison
+            return acquisition_date >= today_date - timedelta(days=30)
         else:
             return False
 
-    # Function to check if a user is active in the last N months
-    def is_active_in_last_months(user_data, months):
-        last_participation_date = max(entry[0] for entry in user_data.get('participation', [])) if user_data.get('participation') else None
-        return last_participation_date is not None and last_participation_date >= today_date - relativedelta(months=months)
+    # Function to check if a user is active in the last N months based on role_info
+    def is_active_in_last_months(role_info, months):
+        acquisition_date = role_info[2] if role_info else None
 
-    # Fetch guild members with either of the specified roles
-    aspiring_members = [member for member in ctx.guild.members if discord.utils.get(member.roles, id=1102000164601864304)]
-    deemocrat_members = [member for member in ctx.guild.members if discord.utils.get(member.roles, id=912034805762363473)]
+        if acquisition_date:
+            acquisition_date = acquisition_date.replace(tzinfo=None)  # Remove timezone info for comparison
+            return acquisition_date >= today_date - relativedelta(months=months)
+        else:
+            return False
+
+    # Fetch all members from MongoDB
+    all_members = mongo_members_collection.find()
 
     # Check for "aspiring" members
-    for member in aspiring_members:
-        # Get the user data from MongoDB based on discord_name
-        user_data = mongo_members_collection.find_one({"discord_name": member.name})
-
-        # Check if the member joined the guild less than 30 days ago
-        join_date = user_data.get('join_date', None)
-        if join_date is not None:
-            join_date = datetime.strptime(join_date, "%Y-%m-%d %H:%M:%S")
-            if (today_date - join_date).days < 30:
-                continue  # Skip this member, as they are not considered inactive
-
-        # Check if the member has no entry in MongoDB or no participation entries in the last month
-        if user_data is None or not is_active_in_last_month(user_data):
-            inactive_users_list.append(f"{member.name} ({role_strings[1102000164601864304]})")
+    for member_data in all_members:
+        # Check if the member has the "aspiring deemocrat" role
+        if any(role[0] == 1102000164601864304 and role[1] for role in member_data.get('role_info', [])):
+            # Check if the member has no entry in MongoDB or is not active in the last month
+            if not is_active_in_last_month(member_data.get('role_info', {}).get(0)):
+                inactive_users_list.append(f"{member_data['discord_name']} ({role_strings[1102000164601864304]})")
 
     # Check for "deemocrat" members
-    for member in deemocrat_members:
-        # Get the user data from MongoDB based on discord_name
-        user_data = mongo_members_collection.find_one({"discord_name": member.name})
-
-        # Check if the member joined the guild less than 30 days ago
-        join_date = user_data.get('join_date', None)
-        if join_date is not None:
-            join_date = datetime.strptime(join_date, "%Y-%m-%d %H:%M:%S")
-            if (today_date - join_date).days < 30:
-                continue  # Skip this member, as they are not considered inactive
-
-        # Check if the member has no entry in MongoDB or no participation entries in the last 4 months
-        if user_data is None or not is_active_in_last_months(user_data, role_inactive_periods[912034805762363473]):
-            inactive_users_list.append(f"{member.name} ({role_strings[912034805762363473]})")
+    for member_data in all_members:
+        # Check if the member has the "deemocrat" role
+        if any(role[0] == 912034805762363473 and role[1] for role in member_data.get('role_info', [])):
+            # Check if the member has no entry in MongoDB or is not active in the last 4 months
+            if not is_active_in_last_months(member_data.get('role_info', {}).get(1), role_inactive_periods[912034805762363473]):
+                inactive_users_list.append(f"{member_data['discord_name']} ({role_strings[912034805762363473]})")
 
     if inactive_users_list:
         await ctx.send(f'Inactive users:\n{", ".join(inactive_users_list)}')
@@ -504,10 +492,9 @@ async def on_member_update(before, after):
 
             # Get the specified guild and channel
             guild = bot.get_guild(911623996682932254)  # Replace YOUR_GUILD_ID with your guild ID
-            channel = guild.get_channel(1114195400371486840)  # Replace 1114195400371486840 with your channel ID
+            channel = guild.get_channel(output_channel_id)  # Replace 1114195400371486840 with your channel ID
 
             # Send a message to the channel
             await channel.send(f"Created a new document for {discord_id} ({after.name}) and updated role information.")
-
 
 bot.run(TOKEN)
