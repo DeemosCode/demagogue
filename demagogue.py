@@ -131,25 +131,25 @@ async def award(ctx, participation_type: str):
 
     voice_channels = guild.voice_channels
     voice_members = []
-    
+
     for vc in voice_channels:
         for member in vc.members:
             voice_members.append(member.name.lower())  # convert to lowercase here
-    
+
     voice_members = '\n'.join(voice_members)
     await ctx.send(f'Currently in Voice Channels: \n{voice_members}')
 
     for member_name in voice_members.split("\n"):
         existing_member = mongo_members_collection.find_one({"discord_name": member_name})
 
-        if existing_member is None: 
+        if existing_member is None:
             new_member = {
                 "discord_name": member_name,
                 "name": "",
                 "minutes_today": 0,
                 "pending_award": False,
                 "steam_id_64": "",
-                "participation": [[datetime.now(), participation_type]],
+                "participation": [(datetime.now(), participation_type)],  # List of tuples
                 "geforce_now": False,
                 "level": "none",
                 "vip_this_month": False
@@ -158,7 +158,7 @@ async def award(ctx, participation_type: str):
         else:
             mongo_members_collection.update_one(
                 {"discord_name": member_name},
-                {"$push": {"participation": [datetime.now(), participation_type]}}
+                {"$push": {"participation": (datetime.now(), participation_type)}}
             )
 
 
