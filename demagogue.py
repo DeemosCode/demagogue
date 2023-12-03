@@ -57,37 +57,6 @@ async def on_command_error(ctx, error):
 
 
 @bot.command()
-@commands.has_permissions(administrator=True)
-async def award(ctx, participation_type: str):
-    guild = ctx.guild
-
-    voice_channels = guild.voice_channels
-    voice_members = []
-
-    for vc in voice_channels:
-        for member in vc.members:
-            voice_members.append(member.name.lower())  # convert to lowercase here
-
-    voice_members = '\n'.join(voice_members)
-    await ctx.send(f'Currently in Voice Channels: \n{voice_members}')
-
-    for member_name in voice_members.split("\n"):
-        existing_member = mongo_members_collection.find_one({"discord_name": member_name})
-
-        if existing_member is None:
-            new_member = {
-                "discord_name": member_name,
-                "participation": [(datetime.now(), participation_type)],  # List of tuples
-            }
-            mongo_members_collection.insert_one(new_member)
-        else:
-            mongo_members_collection.update_one(
-                {"discord_name": member_name},
-                {"$push": {"participation": (datetime.now(), participation_type)}}
-            )
-
-
-@bot.command()
 @commands.has_permissions(administrator=True)  
 async def rank(ctx):
     all_members = mongo_members_collection.find()
@@ -173,32 +142,6 @@ async def countrank(ctx):
     ranking_message = '\n'.join(f'{count} \t{name},\t\t\t{types}' for name, count, types in participation_counts)
 
     await ctx.send(f'Participation ranking:\n{ranking_message}')
-
-@bot.command()
-@commands.has_permissions(administrator=True)  
-async def aaward(ctx, ids: str, parttype: str):
-    today_date = datetime.utcnow()
-    id_list = [id.strip().lower() for id in ids.split(",")]
-
-    for discord_id in id_list:
-        member = mongo_members_collection.find_one({"discord_name": discord_id})
-
-        if member is not None:
-            if 'participation' not in member:
-                member['participation'] = []
-
-            member['participation'].append([today_date, parttype])
-            mongo_members_collection.update_one(
-                {"discord_name": discord_id},
-                {"$set": {"participation": member['participation']}}
-            )
-        else:
-            mongo_members_collection.insert_one({
-                'discord_name': discord_id,
-                'participation': [[today_date, parttype]],            
-            })
-        
-    await ctx.send("Added participation entry for specified members.")
 
 @bot.command()
 async def check_activity(ctx):
@@ -389,5 +332,67 @@ async def on_member_update(before, after):
 
             # Send a message to the channel
             await channel.send(f"Created a new document for {discord_id} ({after.name}) and updated role information.")
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def award(ctx, *args):
+    participation_type = 'default_participation_type'  # Set a default participation type if none is provided
+
+    # Check if arguments are provided
+    if args:
+        # If arguments are provided, assume it's the aaward functionality
+        ids = args[0]
+        participation_type = args[1] if len(args) > 1 else 'default_participation_type_aaward'
+        
+        today_date = datetime.utcnow()
+        id_list = [id.strip().lower() for id in ids.split(",")]
+
+        for discord_id in id_list:
+            member = mongo_members_collection.find_one({"discord_name": discord_id})
+
+            if member is not None:
+                if 'participation' not in member:
+                    member['participation'] = []
+
+                member['participation'].append([today_date, participation_type])
+                mongo_members_collection.update_one(
+                    {"discord_name": discord_id},
+                    {"$set": {"participation": member['participation']}}
+                )
+            else:
+                mongo_members_collection.insert_one({
+                    'discord_name': discord_id,
+                    'participation': [[today_date, participation_type]],
+                })
+
+        await ctx.send("Added participation entry for specified members.")
+    else:
+        # If no arguments are provided, assume it's the award functionality
+        guild = ctx.guild
+
+        voice_channels = guild.voice_channels
+        voice_members = []
+
+        for vc in voice_channels:
+            for member in vc.members:
+                voice_members.append(member.name.lower())  # convert to lowercase here
+
+        voice_members = '\n'.join(voice_members)
+        await ctx.send(f'Currently in Voice Channels: \n{voice_members}')
+
+        for member_name in voice_members.split("\n"):
+            existing_member = mongo_members_collection.find_one({"discord_name": member_name})
+
+            if existing_member is None:
+                new_member = {
+                    "discord_name": member_name,
+                    "participation": [(datetime.now(), participation_type)],  # List of tuples
+                }
+                mongo_members_collection.insert_one(new_member)
+            else:
+                mongo_members_collection.update_one(
+                    {"discord_name": member_name},
+                    {"$push": {"participation": (datetime.now(), participation_type)}}
+                )
 
 bot.run(TOKEN)
