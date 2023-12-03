@@ -47,6 +47,10 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 jobstores = {'default': SQLAlchemyJobStore(url='sqlite:///jobs.sqlite')}
 scheduler = AsyncIOScheduler(jobstores=jobstores)
 
+ASPIRING_DEEMOCRAT_ROLE_ID = 1102000164601864304
+DEEMOCRAT_ROLE_ID = 912034805762363473
+
+
 @bot.event
 async def on_ready():
     print(f'We have logged in as {bot.user}')
@@ -149,14 +153,14 @@ async def check_activity(ctx):
 
     # Define role IDs and corresponding inactivity periods
     role_inactive_periods = {
-        1102000164601864304: 1,  # Inactive for 1 month for "aspiring"
-        912034805762363473: 4    # Inactive for 4 months for "deemocrat"
+        ASPIRING_DEEMOCRAT_ROLE_ID: 1,  # Inactive for 1 month for "aspiring"
+        DEEMOCRAT_ROLE_ID: 4    # Inactive for 4 months for "deemocrat"
     }
 
     # Define role strings
     role_strings = {
-        1102000164601864304: "aspiring deemocrat",
-        912034805762363473: "deemocrat"
+        ASPIRING_DEEMOCRAT_ROLE_ID: "aspiring deemocrat",
+        DEEMOCRAT_ROLE_ID: "deemocrat"
     }
 
     inactive_users_list = []
@@ -187,18 +191,18 @@ async def check_activity(ctx):
     # Check for "aspiring" members
     for member_data in all_members:
         # Check if the member has the "aspiring deemocrat" role
-        if any(role[0] == 1102000164601864304 and role[1] for role in member_data.get('role_info', [])):
+        if any(role[0] == ASPIRING_DEEMOCRAT_ROLE_ID and role[1] for role in member_data.get('role_info', [])):
             # Check if the member has no entry in MongoDB or is not active in the last month
             if not is_active_in_last_month(member_data.get('role_info', [])):
-                inactive_users_list.append(f"{member_data['discord_name']} ({role_strings[1102000164601864304]})")
+                inactive_users_list.append(f"{member_data['discord_name']} ({role_strings[ASPIRING_DEEMOCRAT_ROLE_ID]})")
 
     # Check for "deemocrat" members
     for member_data in all_members:
         # Check if the member has the "deemocrat" role
-        if any(role[0] == 912034805762363473 and role[1] for role in member_data.get('role_info', [])):
+        if any(role[0] == DEEMOCRAT_ROLE_ID and role[1] for role in member_data.get('role_info', [])):
             # Check if the member has no entry in MongoDB or is not active in the last 4 months
-            if not is_active_in_last_months(member_data.get('role_info', []), role_inactive_periods[912034805762363473]):
-                inactive_users_list.append(f"{member_data['discord_name']} ({role_strings[912034805762363473]})")
+            if not is_active_in_last_months(member_data.get('role_info', []), role_inactive_periods[DEEMOCRAT_ROLE_ID]):
+                inactive_users_list.append(f"{member_data['discord_name']} ({role_strings[DEEMOCRAT_ROLE_ID]})")
 
     if inactive_users_list:
         await ctx.send(f'Inactive users:\n{", ".join(inactive_users_list)}')
@@ -247,16 +251,16 @@ async def update_roles(ctx):
 
             if member:
                 # Check if the member has the specified roles
-                deemocrat_role = discord.utils.get(ctx.guild.roles, id=912034805762363473)
-                aspiring_deemocrat_role = discord.utils.get(ctx.guild.roles, id=1102000164601864304)
+                deemocrat_role = discord.utils.get(ctx.guild.roles, id=DEEMOCRAT_ROLE_ID)
+                aspiring_deemocrat_role = discord.utils.get(ctx.guild.roles, id=ASPIRING_DEEMOCRAT_ROLE_ID)
 
                 deemocrat_status = bool(deemocrat_role in member.roles)
                 aspiring_deemocrat_status = bool(aspiring_deemocrat_role in member.roles)
 
                 # Store the role information in the MongoDB document
                 role_info = [
-                    (912034805762363473, deemocrat_status, member.joined_at),
-                    (1102000164601864304, aspiring_deemocrat_status, member.joined_at)
+                    (DEEMOCRAT_ROLE_ID, deemocrat_status, member.joined_at),
+                    (ASPIRING_DEEMOCRAT_ROLE_ID, aspiring_deemocrat_status, member.joined_at)
                 ]
 
                 mongo_members_collection.update_one(
@@ -281,8 +285,8 @@ async def on_member_update(before, after):
 
         if existing_member:
             # Check if the specific roles exist in the guild
-            deemocrat_role = discord.utils.get(after.guild.roles, id=912034805762363473)
-            aspiring_deemocrat_role = discord.utils.get(after.guild.roles, id=1102000164601864304)
+            deemocrat_role = discord.utils.get(after.guild.roles, id=DEEMOCRAT_ROLE_ID)
+            aspiring_deemocrat_role = discord.utils.get(after.guild.roles, id=ASPIRING_DEEMOCRAT_ROLE_ID)
 
             if deemocrat_role and aspiring_deemocrat_role:
                 # Check if the roles have changed
@@ -293,13 +297,13 @@ async def on_member_update(before, after):
                 deemocrat_status = bool(deemocrat_role in after.roles)
                 if role_info and role_info[0][1] != deemocrat_status:
                     roles_changed = True
-                role_info[0] = (912034805762363473, deemocrat_status, datetime.utcnow())
+                role_info[0] = (DEEMOCRAT_ROLE_ID, deemocrat_status, datetime.utcnow())
 
                 # Check Aspiring Deemocrat role
                 aspiring_deemocrat_status = bool(aspiring_deemocrat_role in after.roles)
                 if role_info and len(role_info) > 1 and role_info[1][1] != aspiring_deemocrat_status:
                     roles_changed = True
-                role_info[1] = (1102000164601864304, aspiring_deemocrat_status, datetime.utcnow())
+                role_info[1] = (ASPIRING_DEEMOCRAT_ROLE_ID, aspiring_deemocrat_status, datetime.utcnow())
 
                 # Update the MongoDB document only if roles have changed
                 if roles_changed:
