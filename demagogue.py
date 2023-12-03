@@ -57,43 +57,6 @@ async def on_command_error(ctx, error):
 
 
 @bot.command()
-async def migrate(ctx):
-    guild = discord.utils.get(bot.guilds, id=911623996682932254)  # Replace with your guild ID
-
-    aspiring_deemocrat_role = discord.utils.get(guild.roles, id=1102000164601864304)
-    deemocrat_role = discord.utils.get(guild.roles, id=912034805762363473)
-
-    for member in guild.members:
-        if aspiring_deemocrat_role in member.roles:
-            # vip.insert_one({'discord_name': member.id, 'nickname': member.nick, 'rank': 'recruit'})
-            
-            print(member)
-    
-    # for member in guild.members:
-    #     if deemocrat_role in member.roles:
-    #         # vip.insert_one({'discord_name': member.id, 'nickname': member.nick, 'rank': 'deemocrat'})
-    #         print(member.id)
-
-
-    # print('Members with aspiring deemocrat role have been added to the MongoDB collection')
-
-
-@bot.command()
-async def list_now(ctx):
-    guild = ctx.guild
-
-    voice_channels = guild.voice_channels
-    voice_members = []
-    
-    for vc in voice_channels:
-        for member in vc.members:
-            voice_members.append(member.name)
-    
-    voice_members = '\n'.join(voice_members)
-    await ctx.send(f'Currently in Voice Channels: \n{voice_members}')
-
-
-@bot.command()
 @commands.has_permissions(administrator=True)
 async def award(ctx, participation_type: str):
     guild = ctx.guild
@@ -114,14 +77,7 @@ async def award(ctx, participation_type: str):
         if existing_member is None:
             new_member = {
                 "discord_name": member_name,
-                "name": "",
-                "minutes_today": 0,
-                "pending_award": False,
-                "steam_id_64": "",
                 "participation": [(datetime.now(), participation_type)],  # List of tuples
-                "geforce_now": False,
-                "level": "none",
-                "vip_this_month": False
             }
             mongo_members_collection.insert_one(new_member)
         else:
@@ -129,37 +85,6 @@ async def award(ctx, participation_type: str):
                 {"discord_name": member_name},
                 {"$push": {"participation": (datetime.now(), participation_type)}}
             )
-
-
-@bot.command()
-async def steam(ctx, steam_id: str):
-    if not steam_id.isdigit():
-        await ctx.send('Invalid Steam ID. Please provide a valid ID.')
-        return
-
-    discord_id_lower = str(ctx.message.author.id).lower() # convert to lowercase here
-    existing_member = mongo_members_collection.find_one({'discord_name': discord_id_lower})
-
-    if existing_member is None:
-        new_member = {
-            'discord_name': discord_id_lower,
-            'name': ctx.message.author.name,
-            'steam_id_64': steam_id,
-            'minutes_today': 0,
-            'pending_award': False,
-            'participation': [],
-            'geforce_now': False,
-            'level': 'none',
-            'vip_this_month': False
-        }
-        mongo_members_collection.insert_one(new_member)
-        await ctx.send('Your Steam ID has been registered!')
-    else:
-        mongo_members_collection.update_one(
-            {'discord_name': discord_id_lower},
-            {'$set': {'steam_id_64': steam_id}}
-        )
-        await ctx.send('Your Steam ID has been updated!')
 
 
 @bot.command()
@@ -213,15 +138,18 @@ async def rank30(ctx):
     thirty_days_ago = datetime.utcnow() - timedelta(days=30)
 
     for member in all_members:
-        recent_participation = [entry for entry in member['participation'] if entry[0] >= thirty_days_ago]
-        if len(recent_participation) > 0:
-            participation_counts.append((member['discord_name'], len(recent_participation)))
+        # Check if 'participation' field exists in the document
+        if 'participation' in member:
+            recent_participation = [entry for entry in member['participation'] if entry[0] >= thirty_days_ago]
+            if len(recent_participation) > 0:
+                participation_counts.append((member['discord_name'], len(recent_participation)))
 
     participation_counts.sort(key=lambda x: x[1], reverse=True)
 
     ranking_message = '\n'.join(f'{name}: {count}' for name, count in participation_counts)
 
     await ctx.send(f'Participation ranking (last 30 days):\n{ranking_message}')
+
 
 
 @bot.command()
@@ -246,7 +174,6 @@ async def countrank(ctx):
 
     await ctx.send(f'Participation ranking:\n{ranking_message}')
 
-
 @bot.command()
 @commands.has_permissions(administrator=True)  
 async def aaward(ctx, ids: str, parttype: str):
@@ -257,55 +184,21 @@ async def aaward(ctx, ids: str, parttype: str):
         member = mongo_members_collection.find_one({"discord_name": discord_id})
 
         if member is not None:
+            if 'participation' not in member:
+                member['participation'] = []
+
             member['participation'].append([today_date, parttype])
-            mongo_members_collection.update_one({"discord_name": discord_id}, {"$set": {"participation": member['participation']}})
+            mongo_members_collection.update_one(
+                {"discord_name": discord_id},
+                {"$set": {"participation": member['participation']}}
+            )
         else:
             mongo_members_collection.insert_one({
                 'discord_name': discord_id,
-                'minutes_today': 0,
-                'pending_award': False,
-                'steam_id_64': "",
-                'participation': [[today_date, "training"]],
-                'geforce_now': False,
-                'level': 'recruit',
-                'vip_this_month': False,
+                'participation': [[today_date, parttype]],            
             })
         
     await ctx.send("Added participation entry for specified members.")
-
-@bot.command()
-async def request(ctx):
-    if not isinstance(ctx.channel, discord.DMChannel):  # Ensure the command is run in a private message
-        return
-
-    guild = discord.utils.get(bot.guilds, id=911623996682932254)  # Replace with your guild ID
-
-    voice_channels = guild.voice_channels
-    voice_members = []
-
-    for vc in voice_channels:
-        for member in vc.members:
-            voice_members.append(str(member.id).lower())  # convert to lowercase here
-
-    for member_id in voice_members:
-        member = mongo_members_collection.find_one({"discord_name": member_id})
-
-        if member is not None:
-            member['participation'].append([datetime.now(), 'random'])
-            mongo_members_collection.update_one({"discord_name": member_id}, {"$set": {"participation": member['participation']}})
-        else:
-            mongo_members_collection.insert_one({
-                'discord_name': member_id,
-                'minutes_today': 0,
-                'pending_award': False,
-                'steam_id_64': "",
-                'participation': [[datetime.now(), 'random']],
-                'geforce_now': False,
-                'level': 'none',
-                'vip_this_month': False,
-            })
-        
-    await ctx.send("Added 'random' participation for members in voice channels.")
 
 @bot.command()
 async def check_activity(ctx):
